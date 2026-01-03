@@ -1534,7 +1534,24 @@ impl Player {
                 && changed_mouse_buttons.is_empty()
                 && context.mouse_data.hovered.is_some();
 
-            let new_over_object = if mouse_in_stage {
+            // Performance optimization: skip expensive mouse pick when mouse is stationary
+            // and we have a valid cached hovered object. This significantly reduces CPU usage
+            // for scenes with many objects.
+            let hovered_still_valid = context.mouse_data.hovered.map_or(false, |h| {
+                let display = h.as_displayobject();
+                display.visible()
+                    && (display.movie().is_action_script_3() || !display.avm1_removed())
+            });
+
+            let can_skip_pick = !is_mouse_moved
+                && changed_mouse_buttons.is_empty()
+                && mouse_in_stage
+                && hovered_still_valid;
+
+            let new_over_object = if can_skip_pick {
+                // Reuse cached hovered object - no need to traverse the display list
+                context.mouse_data.hovered
+            } else if mouse_in_stage {
                 run_mouse_pick(context, true)
             } else {
                 None
