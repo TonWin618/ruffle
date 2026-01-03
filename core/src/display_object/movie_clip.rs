@@ -2604,25 +2604,19 @@ impl<'gc> TDisplayObject<'gc> for MovieClip<'gc> {
 
                 for child in self.iter_render_list() {
                     if child.clip_depth() > 0 {
-                        // For clip masks, we need to check if point is in mask bounds
-                        if child.world_bounds().contains(point)
-                            && child.hit_test_shape(
-                                context,
-                                point,
-                                HitTestOptions::SKIP_MASK | HitTestOptions::SKIP_INVISIBLE,
-                            )
-                        {
+                        if child.hit_test_shape(
+                            context,
+                            point,
+                            HitTestOptions::SKIP_MASK | HitTestOptions::SKIP_INVISIBLE,
+                        ) {
                             clip_depth = 0;
                         } else {
                             clip_depth = child.clip_depth();
                         }
-                    } else if child.depth() >= clip_depth {
-                        // Early bounds check: skip children whose bounds don't contain the point
-                        if child.world_bounds().contains(point)
-                            && child.hit_test_shape(context, point, options)
-                        {
-                            return true;
-                        }
+                    } else if child.depth() >= clip_depth
+                        && child.hit_test_shape(context, point, options)
+                    {
+                        return true;
                     }
                 }
             }
