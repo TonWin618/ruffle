@@ -2604,19 +2604,25 @@ impl<'gc> TDisplayObject<'gc> for MovieClip<'gc> {
 
                 for child in self.iter_render_list() {
                     if child.clip_depth() > 0 {
-                        if child.hit_test_shape(
-                            context,
-                            point,
-                            HitTestOptions::SKIP_MASK | HitTestOptions::SKIP_INVISIBLE,
-                        ) {
+                        // For clip masks, we need to check if point is in mask bounds
+                        if child.world_bounds().contains(point)
+                            && child.hit_test_shape(
+                                context,
+                                point,
+                                HitTestOptions::SKIP_MASK | HitTestOptions::SKIP_INVISIBLE,
+                            )
+                        {
                             clip_depth = 0;
                         } else {
                             clip_depth = child.clip_depth();
                         }
-                    } else if child.depth() >= clip_depth
-                        && child.hit_test_shape(context, point, options)
-                    {
-                        return true;
+                    } else if child.depth() >= clip_depth {
+                        // Early bounds check: skip children whose bounds don't contain the point
+                        if child.world_bounds().contains(point)
+                            && child.hit_test_shape(context, point, options)
+                        {
+                            return true;
+                        }
                     }
                 }
             }
@@ -2941,26 +2947,43 @@ impl<'gc> TInteractiveObject<'gc> for MovieClip<'gc> {
                         }
                     }
                 } else if result.is_none() {
-                    if let Some(child) = child.as_interactive() {
-                        result = if !child.as_displayobject().movie().is_action_script_3() {
-                            child.mouse_pick_avm1(context, point, require_button_mode)
-                        } else {
-                            let avm2_result =
-                                child.mouse_pick_avm2(context, point, require_button_mode);
-                            if let Avm2MousePick::Hit(result) = avm2_result {
-                                Some(result)
-                            } else {
-                                None
-                            }
-                        }
-                    } else if check_non_interactive
-                        && self.mouse_enabled()
-                        && child.hit_test_shape(context, point, options)
+                    // Early bounds check: skip children whose bounds don't contain the mouse point.
+                    // This significantly reduces hitTest overhead when there are many objects.
+                    let dominated_by_child = if let Some(interactive_child) = child.as_interactive()
                     {
-                        result = Some(this);
-                    }
+                        // For interactive children, check bounds first to avoid expensive recursion.
+                        // Most objects have their hit areas within their bounds.
+                        let child_display = interactive_child.as_displayobject();
+                        if child_display.world_bounds().contains(point) {
+                            result = if !child_display.movie().is_action_script_3() {
+                                interactive_child
+                                    .mouse_pick_avm1(context, point, require_button_mode)
+                            } else {
+                                let avm2_result = interactive_child
+                                    .mouse_pick_avm2(context, point, require_button_mode);
+                                if let Avm2MousePick::Hit(result) = avm2_result {
+                                    Some(result)
+                                } else {
+                                    None
+                                }
+                            };
+                        }
+                        result.is_some()
+                    } else if check_non_interactive && self.mouse_enabled() {
+                        // For non-interactive children, we can safely skip if bounds don't match
+                        if child.world_bounds().contains(point)
+                            && child.hit_test_shape(context, point, options)
+                        {
+                            result = Some(this);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
 
-                    if result.is_some() {
+                    if dominated_by_child {
                         hit_depth = child.depth();
                     }
                 }
